@@ -1,0 +1,15 @@
+data_dir: "data"
+models_dir: "models"
+s3_bucket: "scam-alert-detection-models"
+s3_data_prefix: "data/"
+s3_models_prefix: "models/"
+dynamodb_profiles_table: "Profiles"
+dynamodb_blocked_users_table: "BlockedUsers"
+dynamodb_embeddings_table: "ProfileEmbeddings"
+aws_region: "us-east-1"
+openai_api_key: ""
+tfidf_max_features: 100
+anomaly_epochs: 50
+embedding_model: "all-MiniLM-L6-v2"
+batch_size: 2
+learning_rate: 0.001
