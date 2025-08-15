@@ -1,1 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Data and models
+data/
+models/
+*.csv
+*.pkl
+*.pth
+
+# Secrets
+secrets/
 .streamlit/secrets.toml
+*.json
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Logs
+*.log
+
+# Temporary files
+/tmp/
+*.tmp
+*.bak
+*.cache
+
+# OS-specific
+.DS_Store
+Thumbs.db
