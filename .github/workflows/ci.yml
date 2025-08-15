@@ -1,0 +1,33 @@
+name: CI/CD Pipeline
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        run: pytest tests/
+      - name: Deploy to AWS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          zip -r lambda_preprocess.zip src/lambda_preprocess.py
+          zip -r lambda_predict.zip src/lambda_predict.py
+          zip -r lambda_rag.zip src/rag_pipeline.py
+          aws lambda update-function-code --function-name scam-alert-preprocess --zip-file fileb://lambda_preprocess.zip
+          aws lambda update-function-code --function-name scam-alert-predict --zip-file fileb://lambda_predict.zip
+          aws lambda update-function-code --function-name scam-alert-rag --zip-file fileb://lambda_rag.zip
