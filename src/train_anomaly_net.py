@@ -1,76 +1,70 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
+import pandas as pd
 import numpy as np
-from scipy.sparse import csr_matrix
 import logging
-import yaml
-from pathlib import Path
+import os
+from src.data_loader import load_config, load_data
+from src.lambda_predict import AnomalyNet
 
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Load configuration
-BASE_DIR = Path(__file__).parent.parent
-CONFIG_PATH = BASE_DIR / 'config.yaml'
-with open(CONFIG_PATH, 'r') as f:
-    config = yaml.safe_load(f)
-
-class AnomalyNet(nn.Module):
-    def __init__(self, input_dim):
-        super(AnomalyNet, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 32),
-            nn.ReLU(),
-            nn.Linear(32, 16)
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(16, 32),
-            nn.ReLU(),
-            nn.Linear(32, input_dim)
-        )
-    
-    def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
-
-def train_anomaly_net(X, input_dim):
+def train_anomaly_net(config):
+    """Train AnomalyNet model and save to models directory."""
     try:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-        logger.info(f"Using device: {device}")
-        anomaly_net = AnomalyNet(input_dim).to(device)
-        optimizer = torch.optim.Adam(anomaly_net.parameters(), lr=0.001)
+        # Load data
+        data_dir = config['data_dir']
+        processed_data_path = os.path.join(data_dir, 'processed_data.csv')
+        if not os.path.exists(processed_data_path):
+            raise FileNotFoundError(f"Processed data not found at {processed_data_path}")
+        
+        processed_data = pd.read_csv(processed_data_path)
+        X = processed_data[[col for col in processed_data.columns if col.startswith('feature_')]].values
+        
+        # Initialize model
+        input_dim = X.shape[1]
+        model = AnomalyNet(input_dim=input_dim, hidden_dim=64)
         criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
         
-        logger.info(f"Converting X to dense tensor, shape={X.shape}")
-        X_tensor = torch.FloatTensor(X.toarray()).to(device)
-        logger.info(f"X_tensor created, shape={X_tensor.shape}")
+        # Convert data to tensor
+        X_tensor = torch.FloatTensor(X)
         
-        # Handle small datasets
-        if X_tensor.shape[0] < 10:
-            logger.warning(f"Small dataset detected ({X_tensor.shape[0]} samples). Training may be unstable.")
+        # Training loop
+        epochs = config['anomaly_epochs']
+        batch_size = config['batch_size']
+        num_batches = len(X_tensor) // batch_size
         
-        epochs = config.get('anomaly_epochs', 100)
-        logger.info(f"Training for {epochs} epochs")
         for epoch in range(epochs):
-            anomaly_net.train()
-            optimizer.zero_grad()
-            try:
-                output = anomaly_net(X_tensor)
-                loss = criterion(output, X_tensor)
-                if torch.isnan(loss) or torch.isinf(loss):
-                    logger.error(f"Invalid loss at epoch {epoch}: {loss.item()}")
-                    raise ValueError("Training stopped due to invalid loss")
+            model.train()
+            total_loss = 0
+            for i in range(0, len(X_tensor), batch_size):
+                batch = X_tensor[i:i + batch_size]
+                optimizer.zero_grad()
+                outputs = model(batch)
+                loss = criterion(outputs, batch)
                 loss.backward()
                 optimizer.step()
-                if epoch % 10 == 0:
-                    logger.info(f"Epoch {epoch}, Loss: {loss.item():.4f}")
-            except Exception as e:
-                logger.error(f"Error in training loop at epoch {epoch}: {e}")
-                raise
+                total_loss += loss.item()
+            
+            avg_loss = total_loss / num_batches
+            logger.info(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.6f}")
         
-        logger.info("Finished training AnomalyNet")
-        return anomaly_net
+        # Save model
+        models_dir = config['models_dir']
+        os.makedirs(models_dir, exist_ok=True)
+        model_path = os.path.join(models_dir, 'pytorch_model.pth')
+        torch.save(model.state_dict(), model_path)
+        logger.info(f"Saved AnomalyNet model to {model_path}")
+        
+        return model
     except Exception as e:
-        logger.error(f"Error training anomaly network: {e}")
+        logger.error(f"Error training AnomalyNet: {e}")
         raise
+
+if __name__ == "__main__":
+    config = load_config()
+    train_anomaly_net(config)
