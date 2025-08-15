@@ -1,53 +1,72 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import pandas as pd
+import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-from scipy.sparse import hstack
+from sentence_transformers import SentenceTransformer
 import logging
+import os
+from src.data_loader import load_config, load_data
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def preprocess_data(df, config, label_encoders=None, scaler=None, tfidf=None):
-    """Preprocess profile data"""
+def preprocess_data(profiles_df, config):
+    """Preprocess profile data for model training or inference."""
     try:
-        features = config['features']
-        logger.info(f"Using features: {features}")
-        df = df[features + ['label']].drop_duplicates().fillna({'age': df['age'].median(), 'country': 'unknown', 'relationshipGoals': 'unknown', 'aboutMe': 'unknown'})
+        tfidf_max_features = config['tfidf_max_features']
+        embedding_model_name = config['embedding_model']
         
-        if label_encoders is None:
-            label_encoders = {}
-            for col in ['country', 'relationshipGoals']:
-                label_encoders[col] = LabelEncoder()
-                df[col] = label_encoders[col].fit_transform(df[col])
-                logger.info(f"Fitted LabelEncoder for {col} with classes: {label_encoders[col].classes_}")
-        else:
-            for col in ['country', 'relationshipGoals']:
-                try:
-                    df[col] = label_encoders[col].transform(df[col])
-                except ValueError as e:
-                    logger.warning(f"Unknown category in {col}: {e}")
-                    df[col] = label_encoders[col].transform(['unknown'] * len(df))
+        # Preprocess non-text features
+        le_country = LabelEncoder()
+        le_goals = LabelEncoder()
+        scaler = StandardScaler()
         
-        df['subscribed'] = df['subscribed'].astype(int)
+        profiles_df['country_encoded'] = le_country.fit_transform(profiles_df['country'])
+        profiles_df['relationshipGoals_encoded'] = le_goals.fit_transform(profiles_df['relationshipGoals'])
+        profiles_df['subscribed'] = profiles_df['subscribed'].astype(float)
+        non_text_features = scaler.fit_transform(
+            profiles_df[['age', 'country_encoded', 'subscribed', 'relationshipGoals_encoded']]
+        )
         
-        if scaler is None:
-            scaler = StandardScaler()
-            df[['age']] = scaler.fit_transform(df[['age']])
-            logger.info("Fitted StandardScaler for age")
-        else:
-            df[['age']] = scaler.transform(df[['age']])
+        # TF-IDF for aboutMe
+        tfidf = TfidfVectorizer(max_features=tfidf_max_features)
+        aboutMe_tfidf = tfidf.fit_transform(profiles_df['aboutMe']).toarray()
+        logger.info(f"Fitted TfidfVectorizer with {tfidf_max_features} features")
         
-        if tfidf is None:
-            tfidf = TfidfVectorizer(max_features=config.get('tfidf_max_features', 100))
-            aboutMe_tfidf = tfidf.fit_transform(df['aboutMe'])
-            logger.info(f"Fitted TfidfVectorizer with {len(tfidf.get_feature_names_out())} features")
-        else:
-            aboutMe_tfidf = tfidf.transform(df['aboutMe'])
+        # Sentence Transformer embeddings
+        embedding_model = SentenceTransformer(embedding_model_name)
+        embeddings = embedding_model.encode(profiles_df['aboutMe'].tolist(), convert_to_numpy=True)
         
-        X_other = df.drop(columns=['label', 'aboutMe'])
-        X = hstack([X_other.values, aboutMe_tfidf])
-        y = df['label']
+        # Combine features
+        X = np.hstack((non_text_features, aboutMe_tfidf))
         
-        logger.info(f"Preprocessed data: X shape={X.shape}, y shape={y.shape}")
-        return X, y, label_encoders, scaler, tfidf
+        # Save processed data and embeddings
+        processed_data = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
+        processed_data['userId'] = profiles_df['userId']
+        embeddings_df = pd.DataFrame(embeddings, columns=[f'emb_{i}' for i in range(embeddings.shape[1])])
+        embeddings_df['userId'] = profiles_df['userId']
+        
+        output_dir = config['data_dir']
+        processed_data.to_csv(os.path.join(output_dir, 'processed_data.csv'), index=False)
+        embeddings_df.to_csv(os.path.join(output_dir, 'profile_embeddings.csv'), index=False)
+        logger.info(f"Saved processed data and embeddings to {output_dir}")
+        
+        return processed_data, embeddings_df, tfidf, scaler, le_country, le_goals
     except Exception as e:
-        logger.error(f"Error preprocessing data: {e}")
+        logger.error(f"Error in preprocessing: {e}")
         raise
+
+if __name__ == "__main__":
+    config = load_config()
+    datasets = load_data(config['data_dir'])
+    profiles_df = datasets.get('Profiles', pd.DataFrame())
+    if not profiles_df.empty:
+        processed_data, embeddings_df, _, _, _, _ = preprocess_data(profiles_df, config)
+        logger.info("Preprocessing completed successfully")
+    else:
+        logger.error("No profile data available for preprocessing")
