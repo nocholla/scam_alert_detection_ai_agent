@@ -7,7 +7,6 @@ import numpy as np
 import joblib
 import torch
 import logging
-import os
 from src.data_loader import load_config, load_data, load_model
 from src.lambda_predict import AnomalyNet
 
