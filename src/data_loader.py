@@ -1,4 +1,3 @@
-```python
 import pandas as pd
 import yaml
 import logging
@@ -58,4 +57,3 @@ def load_model(model_path, input_dim=None):
     except Exception as e:
         logger.error(f"Error loading model from {model_path}: {e}")
         raise
-```
