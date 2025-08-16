@@ -35,12 +35,14 @@ class AnomalyNet(nn.Module):
         decoded = self.decoder(encoded)
         return decoded
 
-def load_model(model_path, bucket, input_dim):
+def load_model(model_path, bucket, input_dim=None):
     """Load model from S3."""
     s3_client.download_file(bucket, model_path, '/tmp/model')
     if model_path.endswith('.pkl'):
         return joblib.load('/tmp/model')
     elif model_path.endswith('.pth'):
+        if input_dim is None:
+            raise ValueError("input_dim is required for PyTorch models")
         model = AnomalyNet(input_dim=input_dim)
         model.load_state_dict(torch.load('/tmp/model', map_location=torch.device('cpu')))
         model.eval()
@@ -61,12 +63,12 @@ def lambda_handler(event, context):
         X = pd.read_csv(response['Body']).values
         
         # Load models
-        rf_model = load_model(f"{models_prefix}rf_model.pkl", bucket, input_dim)
-        xgb_model = load_model(f"{models_prefix}xgb_model.pkl", bucket, input_dim)
+        rf_model = load_model(f"{models_prefix}rf_model.pkl", bucket)
+        xgb_model = load_model(f"{models_prefix}xgb_model.pkl", bucket)
         anomaly_net = load_model(f"{models_prefix}pytorch_model.pth", bucket, input_dim)
         
         # Run predictions
-        rf_preds = rf_model.predict_proba(X)[:, 1]  # Probability of anomaly
+        rf_preds = rf_model.predict_proba(X)[:, 1]
         xgb_preds = xgb_model.predict_proba(X)[:, 1]
         anomaly_scores = []
         for x in X:
